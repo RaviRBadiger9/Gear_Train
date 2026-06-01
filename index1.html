@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SpurGear Pro | Custom Design Suite</title>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: #f1f5f9; padding: 20px; }
+        .calc-panel { background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155; }
+        .result-item { margin: 10px 0; font-family: monospace; color: #38bdf8; }
+    </style>
+</head>
+<body>
+
+<div class="calc-panel">
+    <h2>Design Calculation Dashboard</h2>
+    <div id="results"></div>
+</div>
+
+<script>
+function updateDesign() {
+    // Inputs from your notebook
+    const z1 = 18;
+    const z2 = 42;
+    const yieldStress = 750;
+    const fos = 1.5;
+    const powerKW = 9.6; // Example from your note
+    const engineSpeed = 2500;
+    const b = 12; // Face width constant
+    
+    // 1. Allowable Stress
+    const allowableS = yieldStress / fos;
+    
+    // 2. Weaker Part Analysis (y = 0.154 - 0.912/z)
+    const y1 = 0.154 - (0.912 / z1);
+    const y2 = 0.154 - (0.912 / z2);
+    
+    const sigmaY1 = allowableS * y1;
+    const sigmaY2 = allowableS * y2;
+    
+    // 3. Velocity and Tangential Load
+    const gearRatio = z2 / z1;
+    const pinionSpeed = engineSpeed / 3; // Assuming ratio of 3 used in note
+    const velocityFactor = 0.7854; // m coefficient
+    
+    // Calculation Display
+    document.getElementById('results').innerHTML = `
+        <div class="result-item">Allowable Stress (S): ${allowableS.toFixed(2)} MPa</div>
+        <div class="result-item">Pinion Form Factor (y1): ${y1.toFixed(4)}</div>
+        <div class="result-item">Gear Form Factor (y2): ${y2.toFixed(4)}</div>
+        <div class="result-item">Pinion Strength (σd1*y1): ${sigmaY1.toFixed(2)}</div>
+        <div class="result-item">Gear Strength (σd2*y2): ${sigmaY2.toFixed(2)}</div>
+        <div class="result-item">Target Weaker Part: ${sigmaY1 < sigmaY2 ? 'Pinion' : 'Gear'}</div>
+    `;
+}
+
+// Run initial calculation
+updateDesign();
+</script>
+
+</body>
+</html>
