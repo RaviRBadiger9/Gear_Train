@@ -42,13 +42,16 @@
         .status-safe { background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.3); color: #34d399; }
         .status-failed { background: rgba(244, 63, 94, 0.1); border-color: rgba(244, 63, 94, 0.3); color: #f43f5e; }
         
+        .solution-box { background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); padding: 12px; border-radius: 8px; font-size: 11px; color: #fcd34d; }
+        .solution-box ul { margin-left: 16px; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+        
         #toggleBtn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; background: #0f172a; color: #f1f5f9; border: 1px solid #475569; padding: 10px 20px; border-radius: 9999px; font-size: 10px; font-weight: bold; cursor: pointer; letter-spacing: 1px; }
         .fea-legend { position: absolute; bottom: 20px; right: 20px; width: 180px; background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 8px; border: 1px solid #1e293b; font-size: 10px; z-index: 40; }
         .gradient-bar { height: 8px; width: 100%; background: linear-gradient(to right, #1e40af, #f59e0b, #ef4444); border-radius: 2px; margin: 6px 0; }
         
         .chart-box { background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 12px; border-radius: 8px; }
-        .chart-container-1 { height: 160px; position: relative; }
-        .chart-container-2 { height: 130px; position: relative; }
+        .chart-container-1 { height: 140px; position: relative; }
+        .chart-container-2 { height: 115px; position: relative; }
         
         .btn-main { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer; }
         .btn-main:hover { background: #2563eb; }
@@ -59,7 +62,7 @@
             header, aside.sidebar-left, main.viewport-center, #splash-screen, #toggleBtn { display: none !important; }
             .app-container { display: block; width: 100%; }
             aside.sidebar-right { width: 100% !important; border: none !important; background: transparent !important; padding: 0 !important; display: block !important; }
-            .chart-box, .calc-card, .status-panel { background: #ffffff !important; border: 1px solid #000000 !important; color: #000000 !important; page-break-inside: avoid; margin-bottom: 15px; box-shadow: none !important; }
+            .chart-box, .calc-card, .status-panel, .solution-box { background: #ffffff !important; border: 1px solid #000000 !important; color: #000000 !important; page-break-inside: avoid; margin-bottom: 15px; box-shadow: none !important; }
             span, div, label { color: #000000 !important; }
             .status-safe { border-left: 6px solid #10b981 !important; }
             .status-failed { border-left: 6px solid #f43f5e !important; }
@@ -137,9 +140,9 @@
                     <div class="input-group">
                         <label>Duty Cycle</label>
                         <select id="service-type" onchange="updateDesign()">
-                            <option value="intermittent">Intermittent</option>
-                            <option value="standard" selected>Standard</option>
-                            <option value="continuous">Continuous</option>
+                            <option value="intermittent">3 Hours / Day</option>
+                            <option value="standard" selected>10 Hours / Day</option>
+                            <option value="continuous">24 Hours / Day</option>
                         </select>
                     </div>
                 </div>
@@ -223,10 +226,15 @@
                     <div class="chart-container-1"><canvas id="stressChart"></canvas></div>
                 </div>
                 <div class="chart-box">
+                    <label>Dynamic Margin Map (Safety vs Failure Boundary)</label>
+                    <div class="chart-container-2"><canvas id="marginChart"></canvas></div>
+                </div>
+                <div class="chart-box">
                     <label>Safety Factor Operating Curve vs Module Size</label>
                     <div class="chart-container-2"><canvas id="factorCurveChart"></canvas></div>
                 </div>
 
+                <div id="solution-output"></div>
                 <div id="step-output" class="mono" style="display: flex; flex-direction: column; gap: 10px;"></div>
             </aside>
         </div>
@@ -239,6 +247,7 @@
         let globalCalcResults = {};
         let stressChartInstance = null;
         let curveChartInstance = null;
+        let marginChartInstance = null;
 
         const structuralPalette = { pinion: 0x1e40af, driven: 0x065f46, inter: 0xb45309, output: 0x6d28d9 };
         const serviceFactorTable = {
@@ -410,7 +419,6 @@
             return gearContainer;
         }
 
-        // PROFILE-WRAPPED CONTOURED CAST CASING ENGINE
         function rebuildTransparentCasing() {
             if(transparentCasing) scene.remove(transparentCasing);
             transparentCasing = new THREE.Group();
@@ -555,271 +563,332 @@
                 }
             });
 
-            const boltGeo = new THREE.CylinderGeometry(3.5, 3.5, 8, 16);
-            const capGeo = new THREE.CylinderGeometry(5.5, 5.5, 5, 16);
-            const boltMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.95, roughness: 0.1 });
-
-            centers.forEach((c, idx) => {
-                const steps = 6;
-                for (let i = 0; i < steps; i++) {
-                    const angle = (i / steps) * Math.PI * 2 + (idx * 0.3);
-                    const bx = c.x + Math.cos(angle) * (c.r + flangeWidth * 0.5);
-                    const bz = c.z + Math.sin(angle) * (c.r + flangeWidth * 0.5);
-                    
-                    const padGeo = new THREE.CylinderGeometry(8, 8, 7, 16);
-                    const pad = new THREE.Mesh(padGeo, solidMetalMat);
-                    pad.position.set(bx, 0, bz);
-                    transparentCasing.add(pad);
-
+            const boltGeo = new THREE.CylinderGeometry(2.5, 2.5, 12, 16);
+            const boltMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.1 });
+            
+            centers.forEach(c => {
+                for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
                     const bolt = new THREE.Mesh(boltGeo, boltMat);
-                    bolt.position.set(bx, 0, bz);
+                    bolt.position.set(c.x + Math.cos(a) * (c.r + 8), 0, c.z + Math.sin(a) * (c.r + 8));
                     transparentCasing.add(bolt);
-
-                    const cap = new THREE.Mesh(capGeo, boltMat);
-                    cap.position.set(bx, 4, bz);
-                    transparentCasing.add(cap);
                 }
             });
-
-            const wireframeGeo = new THREE.EdgesGeometry(shellGeo);
-            const lineMat = new THREE.LineBasicMaterial({ color: 0x0ea5e9, linewidth: 1.5 });
-            const upperLines = new THREE.LineSegments(wireframeGeo, lineMat);
-            upperLines.rotation.x = -Math.PI / 2;
-            transparentCasing.add(upperLines);
-
-            const lowerLines = upperLines.clone();
-            lowerLines.scale.y = -1;
-            transparentCasing.add(lowerLines);
 
             scene.add(transparentCasing);
         }
 
         function updateDesign() {
-            if(!gearGroup) return;
-            while(gearGroup.children.length > 0) gearGroup.remove(gearGroup.children[0]);
             activeGears = [];
-            document.getElementById('weight-display').classList.add('hidden');
-            
-            const z1 = Math.max(1, parseInt(document.getElementById('z1').value) || 1);
-            const z2 = Math.max(1, parseInt(document.getElementById('z2').value) || 1);
-            const z3 = Math.max(1, parseInt(document.getElementById('z3').value) || 1);
-            const z4 = Math.max(1, parseInt(document.getElementById('z4').value) || 1);
+            while(gearGroup.children.length > 0) { 
+                gearGroup.remove(gearGroup.children[0]); 
+            }
+
             const m = parseFloat(document.getElementById('module-sel').value);
-            const p = parseFloat(document.getElementById('in-p').value) || 0;
-            const n1 = parseFloat(document.getElementById('in-n').value) || 1;
-            const toothType = document.getElementById('tooth-system').value;
-            const errorVal = document.getElementById('gear-error').value;
+            const P = parseFloat(document.getElementById('in-p').value);
+            const n1 = parseFloat(document.getElementById('in-n').value);
+            
+            const Z1 = parseInt(document.getElementById('z1').value);
+            const Z2 = parseInt(document.getElementById('z2').value);
+            
+            const pStress = parseFloat(document.getElementById('material-stress').value);
             const matPair = document.getElementById('mat-pair').value;
-            const sigma0 = parseFloat(document.getElementById('material-stress').value);
-            const cs = serviceFactorTable[document.getElementById('load-type').value][document.getElementById('service-type').value];
-            const C = dynamicFactorC[toothType][matPair][errorVal];
+            const loadType = document.getElementById('load-type').value;
+            const serviceType = document.getElementById('service-type').value;
+            const profileAngle = document.getElementById('tooth-system').value;
+            const errorClass = document.getElementById('gear-error').value;
 
-            const d1 = z1 * m;
-            const d2 = z2 * m;
-            const b = 10 * m;
-            const gearRatio = z2 / z1;
-            
-            const v = parseFloat(((Math.PI * d1 * n1) / 60000).toFixed(3));
-            const ft = parseFloat(((1000 * p) / (v > 0 ? v : 1)).toFixed(2));
-            const ftEff = parseFloat((ft * cs).toFixed(2));
-            
-            const getY = (z) => (toothType === "20") ? 0.154 - (0.912/z) : (toothType === "20stub" ? 0.175 - (0.841/z) : 0.124 - (0.684/z));
-            const y1 = getY(z1), y2 = getY(z2);
-            const designY = (y1 <= y2) ? y1 : y2;
+            const d1 = Z1 * m;
+            const d2 = Z2 * m;
+            const b = 10 * m; 
+            const v = (Math.PI * d1 * n1) / 60000; 
 
-            const fs = parseFloat((sigma0 * b * Math.PI * m * designY).toFixed(2));
-            const term1 = parseFloat((21 * v).toFixed(2));
-            const term2 = parseFloat(((b * C) + ftEff).toFixed(2));
-            const fd = parseFloat((ftEff + ((term1 * term2) / (term1 + Math.sqrt(term2)))).toFixed(2));
-            const bendingStress = (b * m * designY > 0) ? (ftEff / (b * m * designY)) : 0;
-            
-            document.getElementById('max-stress-label').innerText = bendingStress.toFixed(1) + " MPa";
+            const Cs = serviceFactorTable[loadType][serviceType];
+            const Cv = 3.05 / (3.05 + v); 
 
-            globalCalcResults = { bendingStress: bendingStress, isSafe: fs > fd };
+            const Y1 = (profileAngle === '14.5') ? (0.124 - 0.684/Z1) : (0.154 - 0.912/Z1);
+            const Y2 = (profileAngle === '14.5') ? (0.124 - 0.684/Z2) : (0.154 - 0.912/Z2);
 
-            const mesh1Center = (d1 + d2) / 2;
-            if(engineMode === 'single') {
-                gearGroup.add(createGearMesh(z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, mesh1Center));
-                gearGroup.add(createGearMesh(z2, m, mesh1Center, structuralPalette.driven, 0, 0, -1/gearRatio, Math.PI/z2, 0));
-            } else if (engineMode === 'double') {
-                const d3 = z3 * m, d4 = z4 * m;
-                const mesh2Center = mesh1Center + (d3 + d4) / 2;
-                gearGroup.add(createGearMesh(z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, mesh1Center));
-                gearGroup.add(createGearMesh(z2, m, mesh1Center, structuralPalette.driven, 0, 0, -1/gearRatio, Math.PI/z2, 0));
-                gearGroup.add(createGearMesh(z3, m, mesh1Center, structuralPalette.inter, 0, d2, -1/gearRatio, 0, mesh2Center));
-                gearGroup.add(createGearMesh(z4, m, mesh2Center, structuralPalette.output, 0, d2, (1/gearRatio)*(z3/z4), Math.PI/z4, mesh1Center));
-            } else if (engineMode === 'compound') {
-                const d3 = z3 * m, d4 = z4 * m;
-                gearGroup.add(createGearMesh(z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, mesh1Center));
-                gearGroup.add(createGearMesh(z2, m, mesh1Center, structuralPalette.driven, 0, 0, -1/gearRatio, Math.PI/z2, 0));
-                gearGroup.add(createGearMesh(z3, m, mesh1Center, structuralPalette.inter, b + 4, 0, -1/gearRatio, 0, mesh1Center + (d3+d4)/2));
-                gearGroup.add(createGearMesh(z4, m, mesh1Center + (d3+d4)/2, structuralPalette.output, b + 4, 0, (1/gearRatio)*(z3/z4), Math.PI/z4, mesh1Center));
+            const Mt = (9550 * P) / n1; 
+            const Ft = ((Mt * 1000) / (d1 / 2)) * Cs; 
+
+            const C_factor = dynamicFactorC[profileAngle][matPair][errorClass];
+            const Fd = Ft + (21 * v * (b * C_factor + Ft)) / (21 * v + Math.sqrt(b * C_factor + Ft));
+
+            const Wt1 = pStress * b * (m * Math.PI) * Y1; 
+            const Wt2 = pStress * b * (m * Math.PI) * Y2;
+            const beamCapacity = Math.min(Wt1, Wt2);
+
+            const sigma_induced = Ft / (Cv * b * (m * Math.PI) * Y1);
+
+            globalCalcResults = {
+                v: v, Ft: Ft, Fd: Fd, beamCapacity: beamCapacity, 
+                sigma_induced: sigma_induced, maxAllowable: pStress,
+                m: m, d1: d1, d2: d2
+            };
+
+            if (engineMode === 'single') {
+                const pinionMesh = createGearMesh(Z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, d1/2);
+                const drivenMesh = createGearMesh(Z2, m, d1/2 + d2/2, structuralPalette.driven, 0, 0, -(Z1/Z2), 0.08, 0);
+                gearGroup.add(pinionMesh);
+                gearGroup.add(drivenMesh);
+            } 
+            else if (engineMode === 'double' || engineMode === 'compound') {
+                const Z3 = parseInt(document.getElementById('z3').value);
+                const Z4 = parseInt(document.getElementById('z4').value);
+                const d3 = Z3 * m;
+                const d4 = Z4 * m;
+
+                const thickness = 10 * m;
+
+                if (engineMode === 'double') {
+                    const mesh1 = createGearMesh(Z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, d1/2);
+                    const mesh2 = createGearMesh(Z2, m, d1/2 + d2/2, structuralPalette.inter, 0, 0, -(Z1/Z2), 0.08, 0);
+                    const mesh3 = createGearMesh(Z3, m, d1/2 + d2/2, structuralPalette.inter, 0, 2, -(Z1/Z2), 0, (d1/2 + d2/2) + d3/2);
+                    const mesh4 = createGearMesh(Z4, m, (d1/2 + d2/2) + (d3/2 + d4/2), structuralPalette.output, 0, 2, (Z1/Z2)*(Z3/Z4), 0.14, 0);
+                    
+                    gearGroup.add(mesh1); gearGroup.add(mesh2); gearGroup.add(mesh3); gearGroup.add(mesh4);
+                } else {
+                    const mesh1 = createGearMesh(Z1, m, 0, structuralPalette.pinion, 0, 0, 1, 0, d1/2);
+                    const mesh2 = createGearMesh(Z2, m, d1/2 + d2/2, structuralPalette.inter, -thickness/2, 0, -(Z1/Z2), 0.08, 0);
+                    const mesh3 = createGearMesh(Z3, m, d1/2 + d2/2, structuralPalette.inter, thickness/2, 0, -(Z1/Z2), 0, (d1/2 + d2/2) + d3/2);
+                    const mesh4 = createGearMesh(Z4, m, (d1/2 + d2/2) + (d3/2 + d4/2), structuralPalette.output, thickness/2, 0, (Z1/Z2)*(Z3/Z4), 0.22, 0);
+                    
+                    gearGroup.add(mesh1); gearGroup.add(mesh2); gearGroup.add(mesh3); gearGroup.add(mesh4);
+                }
             }
 
             rebuildTransparentCasing();
-
-            const modules = [1, 2, 3, 4, 5, 6, 8];
-            const sweepData = modules.map(mOpt => {
-                const d1O = z1 * mOpt, bO = 10 * mOpt;
-                const vO = (Math.PI * d1O * n1) / 60000;
-                const ftO = ((1000 * p) / (vO > 0 ? vO : 1)) * cs;
-                const fsO = sigma0 * bO * Math.PI * mOpt * designY;
-                const fdO = ftO + (((21 * vO) * ((bO * C) + ftO)) / ((21 * vO) + Math.sqrt((bO * C) + ftO)));
-                return { module: mOpt, safetyFactor: fdO > 0 ? parseFloat((fsO / fdO).toFixed(2)) : 0 };
-            });
-
-            renderCharts(fs, fd, sweepData, m);
-
-            const isSafe = fs > fd;
-            document.getElementById('step-output').innerHTML = `
-                <div class="calc-card">
-                    <div style="color:#94a3b8; font-size:9px; font-weight:bold; margin-bottom:4px;">STEP 1 // PITCH LINE VELOCITY</div>
-                    <div>v = (&pi; &middot; d&sub1; &middot; n&sub1;) / 60000 = (&pi; &middot; ${d1} &middot; ${n1}) / 60000</div>
-                    <div style="color:#60a5fa; font-weight:bold; margin-top:2px;">v = ${v.toFixed(3)} m/s</div>
-                </div>
-                <div class="calc-card">
-                    <div style="color:#94a3b8; font-size:9px; font-weight:bold; margin-bottom:4px;">STEP 2 // TANGENTIAL & EFFECTIVE LOADS</div>
-                    <div>F_t = (1000 &middot; P) / v = (1000 &middot; ${p}) / ${v} = ${ft} N</div>
-                    <div style="margin-top:2px;">F_eff = F_t &middot; C_s = ${ft} &middot; ${cs}</div>
-                    <div style="color:#60a5fa; font-weight:bold; margin-top:2px;">F_eff = ${ftEff} N</div>
-                </div>
-                <div class="calc-card">
-                    <div style="color:#94a3b8; font-size:9px; font-weight:bold; margin-bottom:4px;">STEP 3 // FORM FACTORS & LEWIS BEAM STRENGTH</div>
-                    <div style="color:#94a3b8; margin-bottom:2px;">Y1 (Pinion): ${y1.toFixed(4)} | Y2 (Gear): ${y2.toFixed(4)}</div>
-                    <div>F_s = &sigma;&sub0; &middot; b &middot; &pi; &middot; m &middot; Y_design = ${sigma0} &middot; ${b} &middot; &pi; &middot; ${m} &middot; ${designY.toFixed(4)}</div>
-                    <div style="color:#60a5fa; font-weight:bold; margin-top:2px;">F_s = ${fs.toFixed(2)} N</div>
-                </div>
-                <div class="calc-card">
-                    <div style="color:#94a3b8; font-size:9px; font-weight:bold; margin-bottom:4px;">STEP 4 // BUCKINGHAM DYNAMIC LOAD</div>
-                    <div>F_d = F_eff + [21v(bC + F_eff)] / [21v + &radic;(bC + F_eff)]</div>
-                    <div style="color:#94a3b8; font-size:10px;">C-Value Matrix Constant: ${C} N/mm</div>
-                    <div style="color:#60a5fa; font-weight:bold; margin-top:2px;">F_d = ${fd.toFixed(2)} N</div>
-                </div>
-                <div class="status-panel ${isSafe ? 'status-safe' : 'status-failed'}">
-                    <div style="font-size:10px; font-weight:bold; text-transform:uppercase;">Structural Status Diagnostics</div>
-                    <div style="font-size:14px; font-weight:bold;">${isSafe ? 'DESIGN COMPLIANT (SAFE)' : 'STRUCTURAL FAILED (UNSAFE)'}</div>
-                    <div style="font-size:11px; margin-top:2px;">Beam Safety Factor Ratio: ${(fs / (fd > 0 ? fd : 1)).toFixed(2)} (F_s vs F_d)</div>
-                </div>
-            `;
-        }
-
-        function renderCharts(fs, fd, sweep, activeM) {
-            const ctx1 = document.getElementById('stressChart').getContext('2d');
-            const ctx2 = document.getElementById('factorCurveChart').getContext('2d');
-
-            if(stressChartInstance) stressChartInstance.destroy();
-            if(curveChartInstance) curveChartInstance.destroy();
-
-            stressChartInstance = new Chart(ctx1, {
-                type: 'bar',
-                data: {
-                    labels: ['Beam Capacity (Fs)', 'Dynamic Load (Fd)'],
-                    datasets: [{
-                        data: [fs, fd],
-                        backgroundColor: [fs > fd ? 'rgba(52,211,153,0.85)' : 'rgba(244,63,94,0.85)', 'rgba(59,130,246,0.7)'],
-                        borderColor: [fs > fd ? '#10b981' : '#f43f5e', '#3b82f6'],
-                        borderWidth: 1,
-                        barThickness: 35
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-            });
-
-            curveChartInstance = new Chart(ctx2, {
-                type: 'line',
-                data: {
-                    labels: sweep.map(s => s.module + 'mm'),
-                    datasets: [{
-                        data: sweep.map(s => s.safetyFactor),
-                        borderColor: '#8b5cf6',
-                        borderWidth: 2,
-                        tension: 0.2,
-                        fill: false,
-                        pointBackgroundColor: sweep.map(s => s.module === activeM ? '#f59e0b' : '#64748b'),
-                        pointRadius: sweep.map(s => s.module === activeM ? 7 : 4)
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-            });
+            renderStepReports(sigma_induced, pStress, Ft, Fd, beamCapacity);
+            updateDashboardCharts();
         }
 
         function calculateSystemWeight() {
-            const m = parseFloat(document.getElementById('module-sel').value);
-            const z1 = parseInt(document.getElementById('z1').value) || 0;
-            const z2 = parseInt(document.getElementById('z2').value) || 0;
-            const rho = 7.85e-6; 
-            const thickness = 10 * m;
+            const display = document.getElementById('weight-display');
+            display.classList.remove('hidden');
 
-            const getWeight = (z) => {
-                const r_pitch = (z * m) / 2;
-                let volume = Math.PI * Math.pow(r_pitch, 2) * thickness;
-                if (z > 22) { 
-                    const r_dedendum = r_pitch - 1.25 * m;
-                    volume -= 4 * (Math.PI * Math.pow(r_dedendum * 0.16, 2) * thickness);
-                }
-                return volume * rho;
-            };
+            const m = globalCalcResults.m;
+            const steelDensity = 7850; 
+            const faceWidth = (10 * m) / 1000; 
 
-            const w1 = getWeight(z1);
-            const w2 = getWeight(z2);
-            document.getElementById('w-z1').innerText = w1.toFixed(2) + " kg";
-            document.getElementById('w-z2').innerText = w2.toFixed(2) + " kg";
-            let total = w1 + w2;
+            let totalMass = 0;
+            activeGears.forEach((g, idx) => {
+                const r_pitch = ((g.z * m) / 2) / 1000; 
+                let volume = Math.PI * Math.pow(r_pitch, 2) * faceWidth;
+                
+                if (g.z > 22) volume *= 0.74; 
+                
+                const mass = volume * steelDensity;
+                totalMass += mass;
+                
+                if (idx === 0) document.getElementById('w-z1').innerText = `${mass.toFixed(2)} kg`;
+                if (idx === 1) document.getElementById('w-z2').innerText = `${mass.toFixed(2)} kg`;
+            });
 
-            if(engineMode !== 'single') {
+            if (activeGears.length > 2) {
                 document.getElementById('w-stage2').classList.remove('hidden');
-                const w3 = getWeight(parseInt(document.getElementById('z3').value) || 0);
-                const w4 = getWeight(parseInt(document.getElementById('z4').value) || 0);
-                document.getElementById('w-z3').innerText = w3.toFixed(2) + " kg";
-                document.getElementById('w-z4').innerText = w4.toFixed(2) + " kg";
-                total += (w3 + w4);
+                const m3 = (Math.PI * Math.pow((((parseInt(document.getElementById('z3').value)*m)/2)/1000),2)*faceWidth)*steelDensity;
+                const m4 = (Math.PI * Math.pow((((parseInt(document.getElementById('z4').value)*m)/2)/1000),2)*faceWidth)*steelDensity*0.74;
+                document.getElementById('w-z3').innerText = `${m3.toFixed(2)} kg`;
+                document.getElementById('w-z4').innerText = `${m4.toFixed(2)} kg`;
+                totalMass += (m3 + m4);
             } else {
                 document.getElementById('w-stage2').classList.add('hidden');
             }
 
-            document.getElementById('w-total').innerText = total.toFixed(2) + " kg";
-            document.getElementById('weight-display').classList.remove('hidden');
+            document.getElementById('w-total').innerText = `${totalMass.toFixed(2)} kg`;
         }
 
         function animate() {
             requestAnimationFrame(animate);
+            if (controls) controls.update();
+
             if (isAnimating && activeGears.length > 0) {
-                const baseDelta = 0.008;
-                activeGears.forEach(gear => {
-                    gear.obj.rotation.z += baseDelta * gear.speed;
-                    if(gear.shaft) gear.shaft.rotation.y = gear.obj.rotation.z;
-
-                    if (gear.targetMeshX !== null) {
-                        gear.teeth.forEach(tooth => {
-                            const worldAngle = tooth.baseAngle + gear.obj.rotation.z;
-                            const tx = gear.globalX + Math.cos(worldAngle) * ((gear.z * gear.m) / 2);
-                            const tz = gear.globalZ + Math.sin(worldAngle) * ((gear.z * gear.m) / 2);
-                            const distance = Math.sqrt(Math.pow(tx - gear.targetMeshX, 2) + Math.pow(tz - 0, 2));
+                const stepAngle = 0.015;
+                
+                activeGears.forEach(g => {
+                    g.obj.rotation.z += stepAngle * g.speed;
+                    
+                    if (g.targetMeshX !== null) {
+                        const currentRot = g.obj.rotation.z;
+                        g.teeth.forEach(t => {
+                            const absoluteAngle = t.baseAngle + currentRot;
+                            const worldX = g.globalX + Math.cos(absoluteAngle) * ((g.z * g.m)/2);
                             
-                            const posAttr = tooth.geometry.attributes.position;
-                            const colAttr = tooth.geometry.attributes.color;
-                            const baseColor = new THREE.Color(gear.baseBodyColor);
-                            const stressColor = new THREE.Color(0xef4444);
+                            const distanceToMeshNode = Math.abs(worldX - g.targetMeshX);
+                            const colorAttr = t.geometry.attributes.color;
 
-                            if (distance < (gear.m * 1.5)) {
-                                for (let j = 0; j < posAttr.count; j++) {
-                                    const localY = posAttr.getY(j);
-                                    const weight = Math.min(1, Math.max(0, localY / (2.25 * gear.m)));
-                                    const blended = baseColor.clone().lerp(stressColor, weight * 0.85);
-                                    colAttr.setXYZ(j, blended.r, blended.g, blended.b);
+                            if (distanceToMeshNode < g.m * 1.5) {
+                                for(let c=0; c<colorAttr.count; c++) {
+                                    colorAttr.setXYZ(c, 0.95, 0.35, 0.1); 
                                 }
                             } else {
-                                for (let j = 0; j < posAttr.count; j++) {
-                                    colAttr.setXYZ(j, baseColor.r, baseColor.g, baseColor.b);
+                                const baseColor = new THREE.Color(g.baseBodyColor);
+                                for(let c=0; c<colorAttr.count; c++) {
+                                    colorAttr.setXYZ(c, baseColor.r, baseColor.g, baseColor.b);
                                 }
                             }
-                            colAttr.needsUpdate = true;
+                            colorAttr.needsUpdate = true;
                         });
                     }
                 });
             }
-            if(controls) controls.update();
-            if(renderer) renderer.render(scene, camera);
+
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        function renderStepReports(sigma, maxSigma, Ft, Fd, beamCap) {
+            const parent = document.getElementById('step-output');
+            const solutionParent = document.getElementById('solution-output');
+            parent.innerHTML = '';
+            solutionParent.innerHTML = '';
+
+            const isSafe = sigma < maxSigma && Fd < beamCap;
+            const fos = maxSigma / sigma;
+
+            const statusPanel = document.createElement('div');
+            statusPanel.className = `status-panel ${isSafe ? 'status-safe' : 'status-failed'}`;
+            statusPanel.innerHTML = `
+                <div style="font-size: 13px; font-weight: bold;">${isSafe ? '✔️ STRUCTURAL DESIGN COMPLIANT' : '❌ MECHANICAL FAILURE DETECTED'}</div>
+                <div style="font-size: 10px;">Factor of Safety: ${fos.toFixed(2)} // Max Contact Limit: ${maxSigma} MPa</div>
+            `;
+            parent.appendChild(statusPanel);
+
+            // Conditional Engineering Remediation Engine
+            if (!isSafe) {
+                const solutionBox = document.createElement('div');
+                solutionBox.className = 'solution-box';
+                solutionBox.innerHTML = `
+                    <div style="font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Recommended Engineering Fixes:</div>
+                    <ul>
+                        <li><b>Increase Module Size (m):</b> Elevating standard module scale directly increases profile cross-section area to scale down bending strain ($\sigma$).</li>
+                        <li><b>Upgrade Material Matrix:</b> Swap current material configuration to <b>Alloy Steel (345.2 MPa)</b> to lift allowable design boundaries.</li>
+                        <li><b>Optimize Manufacturing Quality:</b> Scale down error boundaries from Class III down to Class I to mitigate Buckingham peak dynamic loads ($F_d$).</li>
+                        <li><b>Adjust Pressure Angle:</b> Implement a 20° Stub tooth system to minimize overall cantilever moment arms on critical gear meshes.</li>
+                    </ul>
+                `;
+                solutionParent.appendChild(solutionBox);
+            }
+
+            const cardsData = [
+                { title: "Bending Strain Profile", val: `${sigma.toFixed(2)} MPa`, desc: `Induced Lewis bending stress under working conditions.` },
+                { title: "Buckingham Dynamic Force", val: `${Fd.toFixed(1)} N`, desc: `Total load accounting for pitch velocity kinematics and tooth quality error tracking.` },
+                { title: "Ultimate Beam Capacity", val: `${beamCap.toFixed(1)} N`, desc: `Maximum allowable load limit structural teeth can process before shear structural breakdown occurs.` }
+            ];
+
+            cardsData.forEach(c => {
+                const card = document.createElement('div');
+                card.className = 'calc-card';
+                card.innerHTML = `
+                    <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 2px;">${c.title}</div>
+                    <div style="font-size: 16px; font-weight: bold; color: #3b82f6; margin-bottom: 2px;">${c.val}</div>
+                    <div style="color: #64748b; font-size: 10px; line-height: 1.3;">${c.desc}</div>
+                `;
+                parent.appendChild(card);
+            });
+
+            document.getElementById('max-stress-label').innerText = `${sigma.toFixed(1)} MPa`;
+        }
+
+        function updateDashboardCharts() {
+            const ctx1 = document.getElementById('stressChart').getContext('2d');
+            const ctx2 = document.getElementById('factorCurveChart').getContext('2d');
+            const ctx3 = document.getElementById('marginChart').getContext('2d');
+
+            const currentFt = globalCalcResults.Ft;
+            const currentFd = globalCalcResults.Fd;
+            const beamCap = globalCalcResults.beamCapacity;
+            const currentFos = globalCalcResults.maxAllowable / globalCalcResults.sigma_induced;
+
+            if (stressChartInstance) stressChartInstance.destroy();
+            stressChartInstance = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: ['Tangential (Ft)', 'Dynamic (Fd)', 'Beam Limit (Wp)'],
+                    datasets: [{
+                        data: [currentFt, currentFd, beamCap],
+                        backgroundColor: ['#3b82f6', '#f59e0b', currentFd > beamCap ? '#f43f5e' : '#10b981'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { 
+                        y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+                        x: { ticks: { color: '#94a3b8', font: { size: 9 } } }
+                    }
+                }
+            });
+
+            // Chart 2: Binary Operating Margin Boundary Visualization
+            if (marginChartInstance) marginChartInstance.destroy();
+            marginChartInstance = new Chart(ctx3, {
+                type: 'line',
+                data: {
+                    labels: ['Critical Limit', 'Current System Margin'],
+                    datasets: [
+                        {
+                            label: 'Design Threshold',
+                            data: [1.0, 1.0],
+                            borderColor: '#ef4444',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Your Operating Margin',
+                            data: [currentFos, currentFos],
+                            borderColor: currentFos >= 1.0 ? '#10b981' : '#f43f5e',
+                            backgroundColor: currentFos >= 1.0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)',
+                            pointRadius: 5,
+                            fill: 'origin'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { display: true, labels: { color: '#94a3b8', font: { size: 8 } } }
+                    },
+                    scales: {
+                        y: { min: 0, max: Math.max(3.0, currentFos + 0.5), grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 8 } } },
+                        x: { display: false }
+                    }
+                }
+            });
+
+            const modules = [1, 2, 3, 4, 5, 6, 8];
+            const safetyFactors = modules.map(mod => {
+                const simulatedBeam = globalCalcResults.maxAllowable * (10 * mod) * (mod * Math.PI) * 0.22;
+                return simulatedBeam / globalCalcResults.Fd;
+            });
+
+            if (curveChartInstance) curveChartInstance.destroy();
+            curveChartInstance = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: modules.map(m => `${m}mm`),
+                    datasets: [{
+                        label: 'FOS Curve',
+                        data: safetyFactors,
+                        borderColor: '#a78bfa',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#8b5cf6',
+                        fill: false,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 8 } } },
+                        x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 8 } } }
+                    }
+                }
+            });
         }
     </script>
 </body>
